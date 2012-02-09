@@ -1,0 +1,109 @@
+
+<html>
+
+<head>
+<title>Video effects</title>
+
+<link type="text/css" href="ui/css/ui-lightness/jquery-ui-1.8.16.custom.css" rel="stylesheet" />
+
+<script src="lib/jquery-1.7.min.js"></script>
+<script src="ui/js/jquery-ui-1.8.16.custom.min.js"></script>
+<script src="lib/socket.io.js"></script>
+<script src="require.js"></script>
+
+<style>
+
+#peers {
+    width: 100%;
+    height: 50%;
+}
+
+#blib {
+    position: absolute;
+    display: none;
+    color: white;
+    font-size: 50;
+    z-index: 1000;
+}
+
+.video_dialog {
+    overflow: hidden !important;
+    background-color: black;
+}
+
+#local_video {
+    overflow: hidden;
+}
+
+#canvas {
+    position: fixed;
+    top: 0px;
+    left: 0px;
+}
+
+</style>
+
+</head>
+
+<body style="overflow: hidden">
+
+<div id="blib">*</div>
+
+
+<div id="local_video" title="Local preview">
+    <canvas id="canvas" width="720" height="480"></canvas>
+    <video width="720" height="480" id="localView" autoplay="autoplay" style="display:none"></video>
+</div>
+
+<script>
+
+var Viewer = require("./effects").Viewer;
+
+function gotStream(s) {
+    var url = webkitURL.createObjectURL(s);
+    document.getElementById("localView").src = url;
+}
+
+function gotStreamFailed(error) {
+    console.log("Failed to get access to local media. Error code was " + error.code);
+}
+
+function getUserMedia() {
+    try { navigator.webkitGetUserMedia("video,audio", gotStream, gotStreamFailed); }
+    catch (e) { console.log(e); }
+}
+
+var view;
+
+// Window event handling
+window.onresize = function () {
+    console.log("Window " + window.innerWidth + " Height: " + window.innerHeight);
+    view.resize(document.body.clientWidth, document.body.clientHeight);
+}
+
+window.onload = function() {
+
+    view = new Viewer(document.getElementById("local_video"));
+
+    getUserMedia();
+    $(":button").button();
+    // $("#call_dialog").dialog({});
+    $("#effect").buttonset();
+    /* $("#local_video").dialog({
+        width:640, height:480,
+        resizeStop: function (event, ui) {
+            view.resize($("#local_video").width()-20, $("#local_video").height()-20);
+        }
+    });*/
+    window.onresize();
+
+}
+
+window.onbeforeunload = disconnect;
+
+</script>
+
+</body>
+
+</html>
+

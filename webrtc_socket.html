@@ -1,0 +1,283 @@
+
+<html>
+
+<head>
+<title>Video conference</title>
+
+<link type="text/css" href="ui/css/ui-lightness/jquery-ui-1.8.16.custom.css" rel="stylesheet" />
+
+<style>
+
+button.hangup {
+    position: absolute;
+    bottom: 0px;
+    left: 0px;
+}
+
+button.peer {
+    font-size: 12px;
+}
+
+#peers {
+    width: 100%;
+    height: 50%;
+}
+
+.video_dialog {
+    overflow: hidden !important;
+    background-color: black;
+}
+
+#local_video {
+    overflow: hidden;
+}
+
+</style>
+
+<script src="lib/jquery-1.7.min.js"></script>
+<script src="ui/js/jquery-ui-1.8.16.custom.min.js"></script>
+<script src="lib/socket.io.js"></script>
+<script src="require.js"></script>
+
+</head>
+
+<body>
+
+<table border="0" class="ui-widget-content ui-widget">
+<tr>
+ <td valign="top">
+  <table border="0" cellpadding="0" cellspacing="0">
+  <tr>
+   <td>Email:</td><td><input type="text" id="email" size="60" value=""/></td>
+  </tr>
+  <tr>
+   <td>Nick:</td><td><input type="text" id="nick" size="60" value="name"/></td>
+  </tr>
+  </table>
+ </td>
+ <td valign="top">
+  <button id="connect" onclick="connect();">Connect</button>
+  <!----------
+  <button id="disconnect" onclick="disconnect();" disabled="true">Disconnect</button>
+  <button id="hangup" onclick="hangUp();" disabled="true">Hang up</button>
+  <button id="show_call" onclick="$('#call_dialog').dialog('open');">Call ...</button>
+  ---------->
+ </td>
+</tr>
+</table>
+
+<div id="call_dialog">
+<div id="peer_list">
+    <h3>Not connected</h3>
+</div>
+<button onclick="refreshPeers();">Refresh</button>
+</div>
+
+<div id="local_video" title="Local preview">
+    <canvas id="canvas" width="640" height="480"></canvas>
+    <video width="640" height="480" id="localView" autoplay="autoplay" style="display:none"></video>
+</div>
+
+<script>
+
+var Viewer = require("./effects").Viewer;
+var Client = require("./rtc_client").Client;
+
+// Local stream generation
+
+var cl;
+// = new Client("http://192.168.0.7:8889/");
+
+var media_url;
+
+function gotStream(s) {
+    var url = webkitURL.createObjectURL(s);
+    document.getElementById("localView").src = url;
+    media_url = url;
+    console.log("User has granted access to local media. url = " + url);
+    cl.localStream = s;
+}
+
+function gotStreamFailed(error) {
+    console.log("Failed to get access to local media. Error code was " + error.code);
+}
+
+function getUserMedia() {
+    try {
+        navigator.webkitGetUserMedia("video,audio", gotStream, gotStreamFailed);
+    }
+    catch (e) {
+        console.log(e);
+    }
+}
+
+// Call control
+
+// Put hangup button to each call window...
+
+function doCall(name) {
+    cl.call(name, function (obj) {
+        console.log(obj);
+        if (!obj.error) {
+            // New video here
+            newVideo(obj.socket, obj.user);
+        }
+    });
+    $("#hangup").button("enable");
+}
+
+function hangUpAll() {
+    cl.iterConnections(function (i,pc) { hangUp(i, pc.caller); });
+}
+
+function hangUp(socket_id, user) {
+    user = user || socket_users[socket_id];
+    $("#hangup_" + socket_id).button({label:"Call ended"});
+    console.log("Hanging up " + userString(user));
+    closeCall(socket_id);
+}
+
+function closeCall(socket_id) {
+    console.log("Stopping remote stream");
+    document.getElementById("view_" + socket_id).src = "dummy";
+    cl.hangup(socket_id);
+}
+
+function userString(el) {
+    return el.nick + ' [' + el.id + ']';
+}
+
+function refreshPeers() {
+    cl.search(".*", function (lst) {
+        console.log(lst);
+        var str = "";
+        lst.forEach(function (el) {
+            if (el.id != cl.id) str += '<button class="peer" onclick=doCall(' + JSON.stringify(el.id) + ')>Call ' + userString(el) + '</button>';
+        });
+        if (str.length == 0) str = "<h3>Where is everybody???</h3>";
+        $("#peer_list").html(str);
+        $(".peer").button();
+    });
+}
+
+var connection_state = "unconnected";
+
+function connect() {
+    actions[connection_state]();
+}
+
+var actions = {
+    "connecting": function () {
+        // Here could cancel
+    },
+    "connected": function () {
+        disconnect();
+    },
+    "unconnected": function () {
+        var id = $("#email").val().toLowerCase();
+        var nick = $("#nick").val();
+        connection_state = "connecting";
+        $("#connect").button({label:"Connecting"});
+        cl.register(id, nick, function (obj) {
+            console.log(obj);
+            if (obj.nick) $("#nick").val(obj.nick);
+            cl.connect(function (obj) {
+                console.log(obj);
+                if (!obj.error) {
+                    // Get peers
+                    refreshPeers();
+                    connection_state = "connected";
+                    $("#connect").button({label:"Disconnect"});
+                }
+                else {
+                    connection_state = "unconnected";
+                    $("#connect").button({label:"Connect"});
+                }
+            });
+        });
+    }
+}
+
+function disconnect() {
+    // if (callState == 1)
+    hangUpAll();
+    
+    cl.disconnect();
+
+    $("#connect").button({label:"Connect"});
+}
+
+var socket_users = {};
+
+function newVideo(socket_id, user) {
+    socket_users[socket_id] = user;
+    var str = '<div id="video_' + socket_id + '" class="video_dialog" title="' + userString(user) + '">';
+    str += '<video width="640" height="480" id="view_' + socket_id + '" autoplay="autoplay" style="display: none"></video>';
+    str += '<canvas id="canvas_' + socket_id + '" width="640" height="480"></canvas>';
+    str += '<button class="hangup" id="hangup_' + socket_id + '" onclick="hangUp(' + socket_id + ');">Hangup</button>';
+    str += '</div>';
+    $("body").append(str);
+    $("button.hangup").button();
+    var dialog = document.getElementById("video_" + socket_id);
+    var view = new Viewer(dialog);
+    $(dialog).dialog({
+        width:640, height:480,
+        resizeStop: function (event, ui) {
+            view.resize($(dialog).width()-20, $(dialog).height()-20);
+        },
+        close: function () { console.log("Closing"); hangUp(socket_id); view.close(); $(dialog).remove(); }
+    });
+    return view;
+}
+
+// Window event handling
+
+window.onload = function() {
+    // cl = new Client("http://programming-progress.com:8889/");
+    cl = new Client("http://localhost:8889/");
+
+    // Accept all calls
+    cl.oncall = function (obj, accept) {
+        newVideo(obj.caller_socket, obj.caller);
+        accept();
+    };
+    
+    cl.onhangup = function (obj) {
+        $("#hangup_" + obj.from).button({label: "Call ended"});
+    };
+
+    cl.onaddstream = function (id, url) {
+        document.getElementById("view_" + id).src = url;
+    };
+
+    cl.onremovestream = function (id, e) {
+        document.getElementById("view_" + id).src = "";
+    };
+    
+    if (cl.id) $("#email").val(cl.id);
+
+
+    getUserMedia();
+    $(":button").button();
+    // $("#call_dialog").dialog({});
+    $("#effect").buttonset();
+    $("#local_video").dialog({
+        width:640, height:480,
+        resizeStop: function (event, ui) {
+            view.resize($("#local_video").width(), $("#local_video").height());
+        },
+        beforeClose: function () {
+            return false;
+        },
+    });
+    var view = new Viewer(document.getElementById("local_video"));
+}
+
+window.onbeforeunload = disconnect;
+
+</script>
+
+</body>
+
+</html>
+
