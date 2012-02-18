@@ -8,10 +8,11 @@ var Program = helper.Program;
 var Matrix = matrix.Matrix;
 var $V = matrix.$V;
 
-var effect_names = ["Normal", "Mirror", "Blend", "Detect edges", "Edges and color", "Blur", "Distort", "Ruudut", "Pyöri", "Valotus", "Green", "Red", "Movement", "Glow"];
+var effect_names = ["Normal", "Mirror", "Blend", "Detect edges", "Edges and color", "Blur", "Distort", "Ruudut", "Pyöri", "Valotus", "Green", "Red", "Movement",
+    "Glow", "LBP"];
 
 function effectDiv(name) {
-    var str = '<div id ="' + name + '_effect" style="position:absolute; top:20px; left: 40px; opacity:0.5;">';
+    var str = '<div id ="' + name + '_effect" style="position:absolute; top:20px; left: 40px; opacity:0.5; display: none;">';
     effect_names.forEach(function (el, i) {
         var id = name + '_effect_' + i;
         var checked = i == 0 ? "checked" : "";
@@ -24,7 +25,7 @@ function effectDiv(name) {
 function setupPrograms(ctx) {
     ctx.textureProgram("Edges and color",
         [["sampler2D", "tex1"], ["sampler2D", "tex2"], ["float","w"], ["float","h"]],
-    	"float px = 1.0 / w;" +
+        "float px = 1.0 / w;" +
     	"float py = 1.0 / h;" +
     	"vec4 c1 = texture2D(tex1, vec2(tCoord.s, tCoord.t));" +
     	"vec4 c2 = texture2D(tex1, vec2(tCoord.s + px, tCoord.t));" +
@@ -40,6 +41,30 @@ function setupPrograms(ctx) {
       "float x = c.r + c.g + c.b;" +
       "if (x > 25e-2) gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);" +
       "else gl_FragColor = vec4(avg.r, avg.g, avg.b, 1.0);"); 
+
+    ctx.textureProgram("LBP",
+        [["sampler2D", "tex1"], ["sampler2D", "tex2"], ["float","w"], ["float","h"]],
+        "float px = 1.0 / w;" +
+    	"float py = 1.0 / h;" +
+        "float c1 = length(texture2D(tex1, vec2(tCoord.s + px, tCoord.t + py)));" +
+        "float c2 = length(texture2D(tex1, vec2(tCoord.s + px, tCoord.t)));" +
+        "float c3 = length(texture2D(tex1, vec2(tCoord.s + px, tCoord.t - py)));" +
+        "float c4 = length(texture2D(tex1, vec2(tCoord.s, tCoord.t + py)));" +
+        "float c = length(texture2D(tex1, vec2(tCoord.s, tCoord.t)));" +
+        "float c5 = length(texture2D(tex1, vec2(tCoord.s, tCoord.t - py)));" +
+        "float c6 = length(texture2D(tex1, vec2(tCoord.s - px, tCoord.t + py)));" +
+        "float c7 = length(texture2D(tex1, vec2(tCoord.s - px, tCoord.t)));" +
+        "float c8 = length(texture2D(tex1, vec2(tCoord.s - px, tCoord.t - py)));" +
+        "float bp1 = c1 < c ? 0.0 : 1.0;" +
+        "float bp2 = c2 < c ? 0.0 : 1.0;" +
+        "float bp3 = c3 < c ? 0.0 : 1.0;" +
+        "float bp4 = c4 < c ? 0.0 : 1.0;" +
+        "float bp5 = c5 < c ? 0.0 : 1.0;" +
+        "float bp6 = c6 < c ? 0.0 : 1.0;" +
+        "float bp7 = c7 < c ? 0.0 : 1.0;" +
+        "float bp8 = c8 < c ? 0.0 : 1.0;" +
+        "gl_FragColor = vec4((bp1+2.0*bp2+4.0*bp3)/7.0, (bp4+2.0*bp5+4.0*bp6)/7.0, (bp7 + 2.0*bp8)/3.0, 1.0);"
+    );
 
     ctx.textureProgram("Distort",
         [["sampler2D", "tex1"], ["sampler2D", "tex2"], ["float", "ratio"], ["float","x"]],
@@ -70,8 +95,9 @@ function setupPrograms(ctx) {
         "vec2 p1 = vec2(x, y);" +
         "vec2 p2 = tCoord;" +
         "vec2 v = p1 - p2;" +
-          "float p = 1.0 / ((sin(x*100.0)+2.0) * 10.0 * length(v));" +
-	    "gl_FragColor = vec4(vec3(1.0,0.5,0.1)*p + texture2D(tex1, vec2(1.0-tCoord.s, tCoord.t)).rgb, 1.0);");
+        "float p = 1.0 / ((sin(x*100.0)+2.0) * 10.0 * length(v));" +
+        "gl_FragColor = vec4(p*texture2D(tex1, vec2(1.0-tCoord.s, tCoord.t)).rgb, 1.0);");
+//        "gl_FragColor = vec4(vec3(1.0,0.5,0.1)*p + texture2D(tex1, vec2(1.0-tCoord.s, tCoord.t)).rgb, 1.0);");
         
     ctx.textureProgram("Pyöri",
         [["sampler2D", "tex1"], ["sampler2D", "tex2"], ["float", "ratio"], ["float","x"], ["float", "w"], ["float", "h"]],
@@ -206,7 +232,8 @@ function setupPrograms(ctx) {
 
 }
 
-function Viewer(elem) {
+function Viewer(elem, opt) {
+    opt = opt || {};
     var self = this;
     
     this.name = elem.id || ("moo"+Math.random());
@@ -216,7 +243,7 @@ function Viewer(elem) {
     this.w = 720;
     this.h = 480;
 
-    var gl = helper.initGL(this.target);
+    var gl = opt.disable_webgl ? null :  helper.initGL(this.target);
     if (gl) {
         
         $(elem).append(effectDiv(this.name));
@@ -382,7 +409,7 @@ Viewer.prototype.doDraw = function () {
             this.locy = this.locy || this.h/2;
             this.speedx = this.speedx || 0;
             this.locx = this.locx || this.w/2;
-        if (isNaN(y) && !isNan(x)) {
+        if (isNaN(y) && !isNaN(x)) {
             this.speedx += force(h_lst, this.locx);
         }
         if (isNaN(x) && !isNaN(y)) {

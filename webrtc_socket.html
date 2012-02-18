@@ -8,10 +8,30 @@
 
 <style>
 
-button.hangup {
+div.messages {
     position: absolute;
+    top: 20px; left: 30px;
+    overflow: hidden;
+    height: 50%;
+    font-size: 30px;
+}
+
+.tools {
+    position: absolute;
+    bottom: 20px; left: 30px;
+}
+
+.chatput {
+    font-size: 30px !important;
+    // max-width: 300px;
+    width: 90%;
+    background-color: rgba(0,0,0,0);
+}
+
+button.hangup {
+/*    position: absolute;
     bottom: 0px;
-    left: 0px;
+    left: 0px; */
 }
 
 button.peer {
@@ -46,7 +66,7 @@ button.peer {
 <table border="0" class="ui-widget-content ui-widget">
 <tr>
  <td valign="top">
-  <table border="0" cellpadding="0" cellspacing="0">
+  <table>
   <tr>
    <td>Email:</td><td><input type="text" id="email" size="60" value=""/></td>
   </tr>
@@ -57,6 +77,7 @@ button.peer {
  </td>
  <td valign="top">
   <button id="connect" onclick="connect();">Connect</button>
+  <button id="notify" onclick="checkNotifications();">Notifications ...</button>
   <!----------
   <button id="disconnect" onclick="disconnect();" disabled="true">Disconnect</button>
   <button id="hangup" onclick="hangUp();" disabled="true">Hang up</button>
@@ -73,15 +94,32 @@ button.peer {
 <button onclick="refreshPeers();">Refresh</button>
 </div>
 
-<div id="local_video" title="Local preview">
+<div id="local_video" class="video_dialog" title="Local preview">
     <canvas id="canvas" width="640" height="480"></canvas>
     <video width="640" height="480" id="localView" autoplay="autoplay" style="display:none"></video>
+    <div class="messages"></div>
+    <div class="tools">
+    <input type="text" class="chatput" size="100" onkeydown="return newMessage(event);" />
+    </div>
 </div>
 
 <script>
 
 var Viewer = require("./effects").Viewer;
 var Client = require("./rtc_client").Client;
+var MultiSet = require("./multiset").MultiSet;
+var util = require("./utils");
+
+
+
+function checkNotifications() {
+    if (notify.checkPermission() != 0) notify.requestPermission();
+    
+}
+
+function htmlEntities(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/\n/g, '<br>').replace(/( |\u00a0)/g, ' ').replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;');
+}
 
 // Local stream generation
 
@@ -114,6 +152,14 @@ function getUserMedia() {
 // Call control
 
 // Put hangup button to each call window...
+
+function shadows(elem, n) {
+    if (n == 0) elem.style["text-shadow"] = null;
+    else {
+        elem.style["text-shadow"] = "0px 0px " + n + "px yellow";
+        setTimeout(function () { shadows(elem, n-1); }, 50);
+    }
+}
 
 function doCall(name) {
     cl.call(name, function (obj) {
@@ -201,47 +247,145 @@ var actions = {
 function disconnect() {
     // if (callState == 1)
     hangUpAll();
-    
     cl.disconnect();
-
+    connection_state = "unconnected";
     $("#connect").button({label:"Connect"});
 }
 
 var socket_users = {};
 
+var user_window = new MultiSet();
+var window_user = new MultiSet();
+
+function windowUser(id) {
+    if (window_user.get(id)) return window_user.get(id);
+    else return $("#email").val();
+}
+
+var viewer_opt = {};
+
+if (document.location.hash == "#disable_webgl") viewer_opt.disable_webgl = true;
+
 function newVideo(socket_id, user) {
     socket_users[socket_id] = user;
+    // Make sure the old version is removed
+    $('#video_' + socket_id).remove();
     var str = '<div id="video_' + socket_id + '" class="video_dialog" title="' + userString(user) + '">';
     str += '<video width="640" height="480" id="view_' + socket_id + '" autoplay="autoplay" style="display: none"></video>';
     str += '<canvas id="canvas_' + socket_id + '" width="640" height="480"></canvas>';
+    str += '<div class="messages"></div>';
+    str += '<div class="tools">';
     str += '<button class="hangup" id="hangup_' + socket_id + '" onclick="hangUp(' + socket_id + ');">Hangup</button>';
+    str += '<input type="text" class="chatput" size="100" onkeydown="return newMessage(event);" />';
+    str += '</div>';
     str += '</div>';
     $("body").append(str);
     $("button.hangup").button();
     var dialog = document.getElementById("video_" + socket_id);
-    var view = new Viewer(dialog);
+    var view = new Viewer(dialog, viewer_opt);
     $(dialog).dialog({
         width:640, height:480,
         resizeStop: function (event, ui) {
             view.resize($(dialog).width()-20, $(dialog).height()-20);
         },
-        close: function () { console.log("Closing"); hangUp(socket_id); view.close(); $(dialog).remove(); }
+        close: function () { user_window.set(user.id, null); console.log("Closing"); hangUp(socket_id); view.close(); $(dialog).remove(); }
     });
+    user_window.set(user.id, "video_" + socket_id);
+    window_user.set("video_" + socket_id, user.id);
     return view;
 }
 
-// Window event handling
+function getUserWindow(id) {
+    var elem_id = user_window.get(id) || "local_video";
+    return $("#" + elem_id);
+}
 
-window.onload = function() {
-    // cl = new Client("http://programming-progress.com:8889/");
-    cl = new Client("http://localhost:8889/");
+var received_calls = 0;
 
-    // Accept all calls
-    cl.oncall = function (obj, accept) {
+var acc = '<button class="accept">Accept</button>';
+var rej = '<button class="reject">Reject</button>';
+
+var notify = window.webkitNotifications;
+
+// Also show notifications
+function acceptDialog(obj, accept, reject) {
+    received_calls++;
+    var str = '<div title="Incoming call" id="accept_' + received_calls + '">' + userString(obj.caller) + ' is calling! <br>' + acc + rej + '</div>';
+    $("body").append(str);
+    var dialog = $("#accept_" + received_calls).dialog();
+    dialog.find(".accept").button().click(function () {
+        dialog.dialog("close");
         newVideo(obj.caller_socket, obj.caller);
         accept();
+        ntf.cancel();
+        dialog.remove();
+    });
+    dialog.find(".reject").button().click(function () {
+        dialog.dialog("close");
+        reject();
+        ntf.cancel();
+        dialog.remove();
+    });
+    // Here make a notification
+    if (visible) return;
+    var ntf = notify.createNotification("telephone.jpg", "Incoming call", "Click here to answer " + userString(obj.caller) + "!");
+    ntf.onclick = function () {
+        dialog.dialog("close");
+        newVideo(obj.caller_socket, obj.caller);
+        window.focus();
+        accept();
+        ntf.cancel();
+        dialog.remove();
     };
-    
+    ntf.onclose = function () {
+        dialog.dialog("close");
+        reject();
+        dialog.remove();
+    };
+    ntf.show();
+}
+
+var visible = true;
+
+window.onfocus = function () {
+    visible = true;
+};
+
+window.onblur = function () {
+    visible = false;
+};
+
+function newMessage(ev) {
+    // 
+    if (ev.keyIdentifier == "Enter") {
+        var message = ev.target.value;
+        var win = $(ev.target).parents(".video_dialog");
+        cl.sendMessage(windowUser(win[0].id), message);
+        ev.target.value = "";
+        showMessage(win, "Me", message);
+        return false;
+    }
+    // console.log(ev);
+    return true;
+}
+
+function showMessage(win, sender, message) {
+    var el = win.find(".messages");
+    el.append('<div><b>' + sender + ': </b>' + htmlEntities(message) + '</div>');
+    el[0].scrollTop = el[0].scrollHeight;
+    shadows(el.find("div").last()[0], 20);
+}
+
+window.onload = function() {
+    cl = new Client("http://programming-progress.com:8899/");
+    // cl = new Client("http://192.168.0.7:8889/");
+
+    // Accept all calls
+    cl.oncall = function (obj, accept, reject) {
+        received_calls++;
+        acceptDialog(obj, accept, reject);
+    };
+
     cl.onhangup = function (obj) {
         $("#hangup_" + obj.from).button({label: "Call ended"});
     };
@@ -250,12 +394,17 @@ window.onload = function() {
         document.getElementById("view_" + id).src = url;
     };
 
+    cl.onmessage = function (msg) {
+        // Print on correct window
+        showMessage(getUserWindow(msg.from.id), userString(msg.from), msg.message);
+        console.log(msg);
+    };
+
     cl.onremovestream = function (id, e) {
         document.getElementById("view_" + id).src = "";
     };
-    
-    if (cl.id) $("#email").val(cl.id);
 
+    if (cl.id) $("#email").val(cl.id);
 
     getUserMedia();
     $(":button").button();
@@ -270,7 +419,7 @@ window.onload = function() {
             return false;
         },
     });
-    var view = new Viewer(document.getElementById("local_video"));
+    var view = new Viewer(document.getElementById("local_video"), viewer_opt);
 }
 
 window.onbeforeunload = disconnect;

@@ -20,10 +20,13 @@ function Client(url) {
         else if (pc) pc.processSignalingMessage(msg.data);
     });
     this.socket.on("call", function (msg, cont) {
-        if (self.localStream && self.oncall) self.oncall(msg, function () { self.acceptCall(msg, cont); });
+        if (self.localStream && self.oncall) self.oncall(msg, function () { self.acceptCall(msg, cont); }, function () { self.rejectCall(msg, cont); });
     });
     this.socket.on("hangup_call", function (msg, cont) {
         if (self.onhangup) self.onhangup(msg, cont);
+    });
+    this.socket.on("message", function (msg, cont) {
+        if (self.onmessage) self.onmessage(msg);
     });
     this.connections = {};
 }
@@ -44,6 +47,10 @@ function createPeerConnection(client, id) {
         console.log(e);
     }
 }
+
+Client.prototype.sendMessage = function (id, str, cont) {
+    this.socket.emit("message", {id:id, message: str});
+};
 
 Client.prototype.call = function (id, cont) {
     // Cannot create peerconnection before knows the name of target socket
@@ -74,6 +81,10 @@ Client.prototype.acceptCall = function (msg, cont) {
     pc.caller_socket = msg.caller_socket;
     pc.addStream(this.localStream);
     cont({msg:"Accepted"});
+};
+
+Client.prototype.rejectCall = function (msg, cont) {
+    // cont({msg:"Rejected"});
 };
 
 Client.prototype.iterConnections = function (f) {
@@ -108,7 +119,8 @@ Client.prototype.connect = function (cont) {
 };
 
 Client.prototype.disconnect = function () {
-    this.socket.disconnect();
+    this.socket.emit("unregister", {});
+    // this.socket.disconnect();
 };
 
 Client.prototype.search = function (str, cont) {
