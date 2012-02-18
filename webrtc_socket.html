@@ -310,21 +310,26 @@ var notify = window.webkitNotifications;
 // Also show notifications
 function acceptDialog(obj, accept, reject) {
     received_calls++;
-    var str = '<div title="Incoming call" id="accept_' + received_calls + '">' + userString(obj.caller) + ' is calling! <br>' + acc + rej + '</div>';
+    var str = '<div title="Incoming call" id="accept_' + received_calls + '">';
+    // str += '<div><audio src="telephone.mp3" autoplay /></div>';
+    str += userString(obj.caller) + ' is calling! <br>' + acc + rej + '</div>';
     $("body").append(str);
+    $("body").append('<audio id="ringtone_' + received_calls + '" src="telephone.mp3" autoplay />');
     var dialog = $("#accept_" + received_calls).dialog();
     dialog.find(".accept").button().click(function () {
         dialog.dialog("close");
         newVideo(obj.caller_socket, obj.caller);
-        accept();
         ntf.cancel();
         dialog.remove();
+        $("#ringtone_" + received_calls).remove();
+        accept();
     });
     dialog.find(".reject").button().click(function () {
         dialog.dialog("close");
-        reject();
         ntf.cancel();
         dialog.remove();
+        $("#ringtone_" + received_calls).remove();
+        reject();
     });
     // Here make a notification
     if (visible) return;
@@ -336,11 +341,13 @@ function acceptDialog(obj, accept, reject) {
         accept();
         ntf.cancel();
         dialog.remove();
+        $("#ringtone_" + received_calls).remove();
     };
     ntf.onclose = function () {
         dialog.dialog("close");
         reject();
         dialog.remove();
+        $("#ringtone_" + received_calls).remove();
     };
     ntf.show();
 }
